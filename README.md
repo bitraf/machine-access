@@ -19,13 +19,13 @@ At Bitraf we use [p2k16](https://github.com/bitraf/p2k16) for this.
 
 Device subscribes to these MQTT topics
 
-   $prefix/$devicename/unlock   bool  true  # unlock machine, can now run
-   $prefix/$devicename/lock     bool  true  # lock machine, can not run
+    $prefix/$devicename/unlock   bool  true  # unlock machine, can now run
+    $prefix/$devicename/lock     bool  true  # lock machine, can not run
 
 Device sends on these MQTT topics
 
-   $prefix/$devicename/error     string "errormessage" # error occurred for lock/unlock command
-   $prefix/$devicename/islocked  bool   true|false     # whether machine is locked or not
-   $prefix/$devicename/isrunning bool   true|false     # machine is actively running or not
+    $prefix/$devicename/error     string "errormessage" # error occurred for lock/unlock command
+    $prefix/$devicename/islocked  bool   true|false     # whether machine is locked or not
+    $prefix/$devicename/isrunning bool   true|false     # machine is actively running or not
 
 Example $prefix is `bitraf/machine` and $devicename `bluelaser`.
