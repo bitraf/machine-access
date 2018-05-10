@@ -6,7 +6,15 @@ const char* password = "password";
  
 const char* broker = "mqtt.bitraf.no";
 
-const char relay_pin = 2;
+const char led_pin = 2;
+const char optocoupler_pin = 5;
+const char relay_pin = 4;
+
+#define RELAY_ON HIGH
+#define RELAY_OFF LOW
+
+#define LED_ON LOW
+#define LED_OFF HIGH
 
 WiFiClient wfClient;
 PubSubClient psClient(wfClient);
@@ -20,35 +28,44 @@ void mqttCallback(const char *topic, byte *payload, unsigned length) {
     return;
   }
 
-  const unsigned pin = 2;
+  if (2 == length && 'o' <= payload[0] && 'n' == payload[1]) {
+    digitalWrite(relay_pin, RELAY_ON);
+    return;
+  }
 
-  digitalWrite(relay_pin, HIGH);
-  delay(500);
-  digitalWrite(relay_pin, LOW);
+
+  if (3 == length && 'o' <= payload[0] && 'f' == payload[1] && 'f' == payload[2]) {
+    digitalWrite(relay_pin, RELAY_OFF);
+    return;
+  }
 }
 
 void setup() {
   Serial.begin(115200);
   delay(100);
 
+  digitalWrite(relay_pin, RELAY_OFF);
+  digitalWrite(led_pin, LED_OFF);
+
+  pinMode(led_pin, OUTPUT);
   pinMode(relay_pin, OUTPUT);
- 
+
   // We start by connecting to a WiFi network
- 
+
   Serial.println();
   Serial.println();
   Serial.print("Connecting to ");
   Serial.println(ssid);
-  
+
   WiFi.begin(ssid, password);
-  
+
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
- 
+
   Serial.println("");
-  Serial.println("WiFi connected");  
+  Serial.println("WiFi connected");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
 
@@ -61,13 +78,25 @@ void setup() {
   psClient.connect("relay");
   psClient.subscribe("/public/relay");
 }
- 
+
 void loop() {
   //delay(1000);
-  
+
   if (!psClient.connected()) {
     Serial.println("not connected");
   }
 
   psClient.loop();
+
+  {
+    static long last_time = 0;
+    static char led_state = LED_OFF;
+
+    long now = millis();
+    if (1000 < now - lastTime) {
+      lastTime = now;
+      led_state = LED_ON == led_state ? LED_OFF : LED_ON;
+      digitalWrite(led_pin, led_state);
+    }
+  }
 }
