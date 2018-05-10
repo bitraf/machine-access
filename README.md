@@ -13,7 +13,7 @@ At Bitraf we use [p2k16](https://github.com/bitraf/p2k16) for this.
 
 ## Firmware
 
-`TODO`
+[relay](relay)
 
 ## Protocol
 
