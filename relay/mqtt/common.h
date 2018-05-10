@@ -1,24 +1,21 @@
 #include <ESP8266WiFi.h>
 #include "PubSubClient.h"
 
-const String mqtt_topic_prefix = "/public/machine";
-const String mqtt_topic_device_name = "pick_and_place";
+const String mqtt_topic_prefix = "bitraf/machineaccess";
 const String mqtt_client_id = "machine_access_" + mqtt_topic_device_name;
 
-const char* mqtt_broker = "mqtt.bitraf.no";
+const char *mqtt_broker = "mqtt.bitraf.no";
 
-const char* ssid     = "ssid";
-const char* password = "password";
-
-const String mqtt_topic_base = mqtt_topic_prefix + "/" + mqtt_topic_device_name + "/";
+const String mqtt_topic_base =
+    mqtt_topic_prefix + "/" + mqtt_topic_device_name + "/";
 
 // subscriptions
-const String mqtt_topic_lock   = mqtt_topic_base + "lock";
+const String mqtt_topic_lock = mqtt_topic_base + "lock";
 const String mqtt_topic_unlock = mqtt_topic_base + "unlock";
 
 // publications
-const String mqtt_topic_error      = mqtt_topic_base + "error";
-const String mqtt_topic_is_locked  = mqtt_topic_base + "is_locked";
+const String mqtt_topic_error = mqtt_topic_base + "error";
+const String mqtt_topic_is_locked = mqtt_topic_base + "is_locked";
 const String mqtt_topic_is_running = mqtt_topic_base + "is_running";
 
 const char led_pin = 2;
@@ -55,7 +52,7 @@ void publish_whether_the_machine_is_locked() {
 
 void mqtt_callback(const char *topic_c_str, byte *payload, unsigned length) {
   const String topic(topic_c_str);
-  
+
   if (mqtt_topic_lock == topic) {
     the_machine_is_locked = true;
     lock_or_unlock_the_machine();
@@ -86,9 +83,9 @@ void setup() {
   Serial.println();
   Serial.println();
   Serial.print("Connecting to ");
-  Serial.println(ssid);
+  Serial.println(wifi_ssid);
 
-  WiFi.begin(ssid, password);
+  WiFi.begin(wifi_ssid, wifi_password);
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);

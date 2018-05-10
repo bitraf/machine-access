@@ -1,0 +1,6 @@
+const String mqtt_topic_device_name = "shopbot";
+
+const char* wifi_ssid = "ssid";
+const char* wifi_password = "password";
+
+#include "common.h"
