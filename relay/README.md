@@ -19,17 +19,17 @@ example commands
 
 subscribe to changes:
 ```
-mosquitto_sub -h mqtt.bitraf.no -v -t "/public/machine/pick_and_place/is_locked"
+mosquitto_sub -h mqtt.bitraf.no -v -t "bitraf/machineaccess/pick_and_place/is_locked"
 ```
 
 lock pick and place machine:
 ```
-mosquitto_pub -h mqtt.bitraf.no -m "" -t /public/machine/pick_and_place/lock
+mosquitto_pub -h mqtt.bitraf.no -m "" -t "bitraf/machineaccess/pick_and_place/lock"
 ```
 
 unlock pick and place machine:
 ```
-mosquitto_pub -h mqtt.bitraf.no -m "" -t /public/machine/pick_and_place/unlock
+mosquitto_pub -h mqtt.bitraf.no -m "" -t "bitraf/machineaccess/pick_and_place/unlock"
 ```
 
 dependencies
