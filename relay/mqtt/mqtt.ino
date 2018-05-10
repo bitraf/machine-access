@@ -1,10 +1,25 @@
 #include <ESP8266WiFi.h>
 #include "PubSubClient.h"
- 
+
+const String mqtt_topic_prefix = "/public/machine";
+const String mqtt_topic_device_name = "pick_and_place";
+const String mqtt_client_id = "machine_access_" + mqtt_topic_device_name;
+
+const char* mqtt_broker = "mqtt.bitraf.no";
+
 const char* ssid     = "ssid";
 const char* password = "password";
- 
-const char* broker = "mqtt.bitraf.no";
+
+const String mqtt_topic_base = mqtt_topic_prefix + "/" + mqtt_topic_device_name + "/";
+
+// subscriptions
+const String mqtt_topic_lock   = mqtt_topic_base + "lock";
+const String mqtt_topic_unlock = mqtt_topic_base + "unlock";
+
+// publications
+const String mqtt_topic_error      = mqtt_topic_base + "error";
+const String mqtt_topic_is_locked  = mqtt_topic_base + "is_locked";
+const String mqtt_topic_is_running = mqtt_topic_base + "is_running";
 
 const char led_pin = 2;
 const char optocoupler_pin = 5;
@@ -19,23 +34,39 @@ const char relay_pin = 4;
 WiFiClient wfClient;
 PubSubClient psClient(wfClient);
 
-long lastTime;
+bool the_machine_is_locked = false;
+bool the_machine_is_running = false;
 
-void mqttCallback(const char *topic, byte *payload, unsigned length) {
-  String topicString(topic);
-  if (topicString != "/public/relay") {
-    Serial.println("topic is not /public/relay");
-    return;
-  }
-
-  if (2 == length && 'o' <= payload[0] && 'n' == payload[1]) {
-    digitalWrite(relay_pin, RELAY_ON);
-    return;
-  }
-
-
-  if (3 == length && 'o' <= payload[0] && 'f' == payload[1] && 'f' == payload[2]) {
+void lock_or_unlock_the_machine() {
+  if (the_machine_is_locked) {
     digitalWrite(relay_pin, RELAY_OFF);
+  } else {
+    digitalWrite(relay_pin, RELAY_ON);
+  }
+}
+
+void publish_whether_the_machine_is_locked() {
+  if (the_machine_is_locked) {
+    psClient.publish(mqtt_topic_is_locked.c_str(), "true");
+  } else {
+    psClient.publish(mqtt_topic_is_locked.c_str(), "false");
+  }
+}
+
+void mqtt_callback(const char *topic_c_str, byte *payload, unsigned length) {
+  const String topic(topic_c_str);
+  
+  if (mqtt_topic_lock == topic) {
+    the_machine_is_locked = true;
+    lock_or_unlock_the_machine();
+    publish_whether_the_machine_is_locked();
+    return;
+  }
+
+  if (mqtt_topic_unlock == topic) {
+    the_machine_is_locked = false;
+    lock_or_unlock_the_machine();
+    publish_whether_the_machine_is_locked();
     return;
   }
 }
@@ -70,18 +101,18 @@ void setup() {
   Serial.println(WiFi.localIP());
 
   Serial.print("connecting to broker ");
-  Serial.println(broker);
+  Serial.println(mqtt_broker);
 
-  psClient.setServer(broker, 1883);
-  psClient.setCallback(mqttCallback);
+  psClient.setServer(mqtt_broker, 1883);
+  psClient.setCallback(mqtt_callback);
 
-  psClient.connect("relay");
-  psClient.subscribe("/public/relay");
+  psClient.connect(mqtt_client_id.c_str());
+
+  psClient.subscribe(mqtt_topic_lock.c_str());
+  psClient.subscribe(mqtt_topic_unlock.c_str());
 }
 
 void loop() {
-  //delay(1000);
-
   if (!psClient.connected()) {
     Serial.println("not connected");
   }
@@ -93,8 +124,8 @@ void loop() {
     static char led_state = LED_OFF;
 
     long now = millis();
-    if (1000 < now - lastTime) {
-      lastTime = now;
+    if (1000 < now - last_time) {
+      last_time = now;
       led_state = LED_ON == led_state ? LED_OFF : LED_ON;
       digitalWrite(led_pin, led_state);
     }
