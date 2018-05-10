@@ -30,5 +30,4 @@ mosquitto_pub -h mqtt.bitraf.no -m "" -t /public/machine/pick_and_place/lock
 unlock pick and place machine:
 ```
 mosquitto_pub -h mqtt.bitraf.no -m "" -t /public/machine/pick_and_place/unlock
-
 ```
