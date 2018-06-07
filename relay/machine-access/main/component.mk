@@ -20,5 +20,9 @@ $(eval $(call FIX,WIFI_PASSWORD))
 $(eval $(call FIX,MQTT_HOST))
 $(eval $(call FIX,MQTT_PORT))
 
+MAIN_GIT_REV = $(shell git rev-parse --short HEAD)
+CFLAGS+=-DMAIN_GIT_REV=\"$(MAIN_GIT_REV)\"
+CPPFLAGS+=-DMAIN_GIT_REV=\"$(MAIN_GIT_REV)\"
+
 show-fix:
 	@echo CFLAGS=$(CFLAGS)

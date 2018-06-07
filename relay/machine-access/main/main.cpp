@@ -5,9 +5,10 @@
 #include "esp_spiffs.h"
 #include "spiffs.h"
 #include "spiffs.h"
-#include "sdkconfig.h"
-
 #include "MQTTClient.h"
+
+#include "sdkconfig.h"
+#include "main.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -100,7 +101,7 @@ static int format_topic(char *buf, size_t sz, const char *suffix)
 
 static MQTTClient mqtt_client;
 static Network mqtt_network;
-unsigned char mqtt_tx_buf[80], mqtt_rx_buf[80];
+unsigned char mqtt_tx_buf[1000], mqtt_rx_buf[1000];
 
 static int mqtt_connect() {
     int ret;
@@ -232,7 +233,7 @@ static void on_message(MessageData *data) {
         ret = -topic_len;
         goto fail;
     }
-    printf("topic=->%s<- ", topic);
+    printf("topic=%s ", topic);
 
     if (1) {
         char tmp[100];
@@ -249,23 +250,22 @@ static void on_message(MessageData *data) {
     }
 
     if (memcmp(&topic[topic_len - sizeof(lock) + 1], lock, sizeof(lock)) == 0) {
-        printf("LOCK ");
+        printf("LOCK \n");
+        app_on_lock();
     } else if (memcmp(&topic[topic_len - sizeof(unlock) + 1], unlock, sizeof(unlock)) == 0) {
-        printf("UNLOCK ");
+        printf("UNLOCK \n");
+        app_on_unlock();
     } else {
         char buf2[100];
         buf_to_cstr(buf2, sizeof(buf2), data->message->payload, data->message->payloadlen);
-        printf("Unkonwn topic: %s", buf2);
         ret = ENODEV;
         goto fail;
     }
 
-    ret = 0;
-    printf("\n");
     return;
 
 fail:
-    printf("\nFAIL: err=%d\n", ret);
+    printf("FAIL: err=%d\n", ret);
 }
 
 static int mqtt_publish(const char *topic, const char *value) {
@@ -331,6 +331,12 @@ void main_task(void* ctx) {
                 ret = mqtt_publish("online", "1");
                 printf("%s: mqtt_publish: %s\n", __FUNCTION__, failok(ret));
                 vTaskDelay(pdMS_TO_TICKS(500));
+
+                char buf[100];
+                snprintf(buf, sizeof(buf), "build-rev: %s\nbuild-timestamp: %s", MAIN_GIT_REV, __TIMESTAMP__);
+                ret = mqtt_publish("info", buf);
+                printf("%s: mqtt_publish: %s\n", __FUNCTION__, failok(ret));
+                vTaskDelay(pdMS_TO_TICKS(500));
             }
         }
         if (notification_value & EVENTS_LOST_IP) {
@@ -340,20 +346,8 @@ void main_task(void* ctx) {
         if (timeout) {
             if (count % 10 == 0)
             printf("Hello World! connected=%d\n", mqtt_client.isconnected);
-            /*
-            if (count == 2) {
-                // pvShowMalloc();
-            }
-
-            if (count == 5) {
-                // set_station_mode();
-            }
-
-        */
             count++;
         }
-
-        // vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
 
@@ -371,6 +365,8 @@ void user_init() {
     printf("Configuration:\n");
     printf("  wifi-ssid=%s\n  wifi-password=%s\n\n", main_config.wifi_ssid, main_config.wifi_password);
     printf("  mqtt-host=%s\n  mqtt-port=%d\n  mqtt-client-id=%s\n\n", main_config.mqtt_host, main_config.mqtt_port, main_config.mqtt_client_id);
+
+    assert(app_init() == 0);
 
     set_station_mode();
 
