@@ -17,22 +17,53 @@ At Bitraf we use [p2k16](https://github.com/bitraf/p2k16) for this.
 
 ## Protocol
 
-Device subscribes to these MQTT topics:
-```
-$prefix/$device_name/lock        <any string>       # lock machine, can not run
-$prefix/$device_name/unlock      <any string>       # unlock machine, can now run
-```
+### Device status
+Mandatory
 
-Device publishes on these MQTT topics:
-```
-$prefix/$device_name/error       "errormessage"     # error occurred for lock/unlock command
-$prefix/$device_name/is_locked   "true" | "false"   # whether machine is locked or not
-$prefix/$device_name/is_running  "true" | "false"   # machine is actively running or not
-```
+    $prefix/device/$id/online
 
-For example:
-- `$prefix`: `bitraf/machine-access`
-- `$device_name`: `laser_blue`
-- `$device_name`: `laser_red`
-- `$device_name`: `pick_and_place`
-- `$device_name`: `shopbot`
+0 for offline
+1 for online
+
+$id is an arbitrary unique identifier. For instance the MAC of device, or an id stored in Flash.
+
+Device must use MQTT last will 0 here.
+
+
+Optional informational topics
+
+    $prefix/device/$id/firmware
+    $prefix/device/$id/ip
+    $prefix/device/$id/status
+    $prefix/device/$id/name
+
+
+### Locks
+
+N locks per device.
+p2k16 has the mapping between device and contained locks.
+
+Payload format: keyA=valueA\nkeyB=valueB\n
+
+    $prefix/$lockid/command
+
+
+    request=20400404
+    command=unlock|lock
+
+Lock state
+
+    $prefix/$lockid/locked
+
+    state=unlock|lock
+    OPTIONAL request=$request-id
+
+Upon successful command, the `locked` state shall be updated.
+
+Error messages
+
+    $prefix/$lockid/error
+
+    message=some-desciptive-text
+    OPTIONAL request=$request-id
+
