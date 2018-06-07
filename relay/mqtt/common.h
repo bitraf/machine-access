@@ -1,7 +1,7 @@
 #include <ESP8266WiFi.h>
 #include "PubSubClient.h"
 
-const String mqtt_topic_prefix = "bitraf/machineaccess";
+const String mqtt_topic_prefix = "bitraf/machine-access";
 const String mqtt_client_id = "machine_access_" + mqtt_topic_device_name;
 
 const char *mqtt_broker = "mqtt.bitraf.no";

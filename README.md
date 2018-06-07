@@ -31,7 +31,7 @@ $prefix/$device_name/is_running  "true" | "false"   # machine is actively runnin
 ```
 
 For example:
-- `$prefix`: `bitraf/machineaccess`
+- `$prefix`: `bitraf/machine-access`
 - `$device_name`: `laser_blue`
 - `$device_name`: `laser_red`
 - `$device_name`: `pick_and_place`
