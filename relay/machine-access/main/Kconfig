@@ -1,0 +1,23 @@
+menu "Main"
+
+config MAIN_WIFI_SSID_DEFAULT
+    string "Wi-Fi SSID"
+    default "espressif"
+
+config MAIN_WIFI_PASSWORD_DEFAULT
+    string "Wi-Fi password"
+    default "12345678"
+
+config MAIN_MQTT_HOST_DEFAULT
+    string "MQTT host"
+    default "bitraf.no"
+
+config MAIN_MQTT_PORT_DEFAULT
+    int "MQTT port"
+    default 1883
+
+config MAIN_MQTT_PREFIX
+    string "MQTT topic prefix"
+    default "public/machine-access"
+
+endmenu
