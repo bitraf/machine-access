@@ -57,8 +57,9 @@ extern "C"
 void user_init();
 
 enum events {
-    EVENTS_GOT_IP = (1 << 0),
-    EVENTS_LOST_IP = (1 << 1),
+    EVENTS_GOT_IP = 1 << 0,
+    EVENTS_LOST_IP = 1 << 1,
+    EVENTS_CONNECT_MQTT = 1 << 2,
 };
 
 xTaskHandle main_task_handle = 0;
@@ -159,6 +160,7 @@ fail:
 static int mqtt_disconnect() {
     printf("%s\n", __FUNCTION__);
 
+    MQTTDisconnect(&mqtt_client);
     // TODO: start timer to reconnect to mqtt
 
     return 0;
@@ -251,10 +253,10 @@ static void on_message(MessageData *data) {
 
     if (memcmp(&topic[topic_len - sizeof(lock) + 1], lock, sizeof(lock)) == 0) {
         printf("LOCK \n");
-        app_on_lock();
+        app_on_lock(data->message);
     } else if (memcmp(&topic[topic_len - sizeof(unlock) + 1], unlock, sizeof(unlock)) == 0) {
         printf("UNLOCK \n");
-        app_on_unlock();
+        app_on_unlock(data->message);
     } else {
         char buf2[100];
         buf_to_cstr(buf2, sizeof(buf2), data->message->payload, data->message->payloadlen);
@@ -272,7 +274,7 @@ static int mqtt_publish(const char *topic, const char *value) {
     char buf[100];
     format_topic(buf, sizeof(buf), topic);
 
-    printf("%s: %s: %s\n", __FUNCTION__, buf, value);
+    printf("%s: %s %s\n", __FUNCTION__, buf, value);
 
     MQTTMessage m;
     bzero(&m, sizeof(m));
@@ -280,7 +282,11 @@ static int mqtt_publish(const char *topic, const char *value) {
     m.payloadlen = strlen(value);
     m.payload = (void *)value;
     m.retained = 1;
-    return MQTTPublish(&mqtt_client, buf, &m);
+    int ret = MQTTPublish(&mqtt_client, buf, &m);
+
+    printf("%s: %s\n", __FUNCTION__, failok(ret));
+
+    return ret;
 }
 
 static void set_station_mode() {
@@ -303,44 +309,73 @@ static void set_station_mode() {
     wifi_station_connect();
 }
 
+static int on_got_ip()
+{
+    struct ip_info info;
+    wifi_get_ip_info(STATION_IF, &info);
+    printf("ip=" IPSTR ", nm=" IPSTR ", gw=" IPSTR "\n", IP2STR(&info.ip), IP2STR(&info.netmask), IP2STR(&info.gw));
+    if (mqtt_connect()) {
+        printf("mqtt_connect failed\n");
+        mqtt_disconnect();
+        return ECONNRESET;
+    }
+
+    int ret = MQTTSubscribe(&mqtt_client, topic_lock, QOS2, on_message);
+    if (ret) {
+        return ret;
+    }
+
+    ret = MQTTSubscribe(&mqtt_client, topic_unlock, QOS2, on_message);
+    if (ret) {
+        return ret;
+    }
+
+    ret = mqtt_publish("online", "1");
+    if (ret) {
+        return ret;
+    }
+
+    char buf[100];
+    int sz = snprintf(buf, sizeof(buf), "build-rev: %s\nbuild-timestamp: %s\n", MAIN_GIT_REV, __TIMESTAMP__);
+
+    if (sz >= sizeof(buf)) {
+        return ENOMEM;
+    }
+
+    ret = mqtt_publish("info", buf);
+    if (ret) {
+        return ret;
+    }
+
+    return app_on_mqtt_connected();
+}
+
 void main_task(void* ctx) {
     (void) ctx;
 
     int count = 0;
-    int ret;
     uint32_t notification_value;
+    int last_connected = 0;
     while (1) {
         int timeout = xTaskNotifyWait(0, UINT32_MAX, &notification_value, pdMS_TO_TICKS(1000)) == pdFALSE;
 
         if (notification_value & EVENTS_GOT_IP) {
-            struct ip_info info;
-            wifi_get_ip_info(STATION_IF, &info);
-            printf("ip=" IPSTR ", nm=" IPSTR ", gw=" IPSTR "\n", IP2STR(&info.ip), IP2STR(&info.netmask), IP2STR(&info.gw));
-            if (mqtt_connect()) {
-                printf("mqtt_connect failed\n");
-                mqtt_disconnect();
-            } else {
-                ret = MQTTSubscribe(&mqtt_client, topic_lock, QOS2, on_message);
-                printf("%s: mqtt_subscribe: %s\n", __FUNCTION__, failok(ret));
-                vTaskDelay(pdMS_TO_TICKS(500));
-
-                ret = MQTTSubscribe(&mqtt_client, topic_unlock, QOS2, on_message);
-                printf("%s: mqtt_subscribe: %s\n", __FUNCTION__, failok(ret));
-                vTaskDelay(pdMS_TO_TICKS(500));
-
-                ret = mqtt_publish("online", "1");
-                printf("%s: mqtt_publish: %s\n", __FUNCTION__, failok(ret));
-                vTaskDelay(pdMS_TO_TICKS(500));
-
-                char buf[100];
-                snprintf(buf, sizeof(buf), "build-rev: %s\nbuild-timestamp: %s", MAIN_GIT_REV, __TIMESTAMP__);
-                ret = mqtt_publish("info", buf);
-                printf("%s: mqtt_publish: %s\n", __FUNCTION__, failok(ret));
-                vTaskDelay(pdMS_TO_TICKS(500));
-            }
+            on_got_ip();
         }
         if (notification_value & EVENTS_LOST_IP) {
             mqtt_disconnect();
+        }
+
+        int is_connected = MQTTIsConnected(&mqtt_client);
+        if (is_connected != last_connected) {
+            last_connected = is_connected;
+
+            if (is_connected) {
+                printf("MQTT connected\n");
+            } else {
+                printf("MQTT disconnected\n");
+                mqtt_disconnect();
+            }
         }
 
         if (timeout) {
@@ -350,6 +385,10 @@ void main_task(void* ctx) {
         }
     }
 }
+
+struct app_deps app_deps = {
+    .mqtt_publish = mqtt_publish
+};
 
 #define THREAD_NAME "main"
 #define THREAD_STACK_WORDS 2048
@@ -366,7 +405,7 @@ void user_init() {
     printf("  wifi-ssid=%s\n  wifi-password=%s\n\n", main_config.wifi_ssid, main_config.wifi_password);
     printf("  mqtt-host=%s\n  mqtt-port=%d\n  mqtt-client-id=%s\n\n", main_config.mqtt_host, main_config.mqtt_port, main_config.mqtt_client_id);
 
-    assert(app_init() == 0);
+    assert(app_init(&app_deps) == 0);
 
     set_station_mode();
 
