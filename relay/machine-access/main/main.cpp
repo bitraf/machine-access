@@ -69,7 +69,8 @@ enum events {
 
 xTaskHandle main_task_handle = 0;
 
-static const char *failok(int ret) {
+static const char *failok(int ret)
+{
     return ret ? "FAIL" : "OK";
 }
 
@@ -97,7 +98,8 @@ void wifi_event_handler_cb(System_Event_t *event)
     }
 }
 
-static void on_message(MessageData *data) {
+static void on_message(MessageData *data)
+{
     static const char lock[] = "/lock";
     static const char unlock[] = "/unlock";
     static char topic[100];
@@ -155,7 +157,7 @@ static int format_topic(char *buf, size_t sz, const char *suffix)
 {
     uint32_t chip_id = system_get_chip_id();
     int count = snprintf(buf, sz, CONFIG_MAIN_MQTT_PREFIX "/%02x%02x%02x/%s",
-            (chip_id >> 16) & 0xff, (chip_id >> 8) & 0xff, chip_id & 0xff, suffix);
+                         (chip_id >> 16) & 0xff, (chip_id >> 8) & 0xff, chip_id & 0xff, suffix);
     return count < sz ? 0 : ENOMEM;
 }
 
@@ -199,7 +201,8 @@ int mqtt_do_connect;
 char topic_lock[100];
 char topic_unlock[100];
 
-static int mqtt_connect() {
+static int mqtt_connect()
+{
     int ret;
     char buf[100];
     // static int count = 0;
@@ -278,7 +281,8 @@ static int mqtt_connect() {
     return app_on_mqtt_connected();
 }
 
-static int mqtt_reset() {
+static int mqtt_reset()
+{
     printf("%s\n", __FUNCTION__);
 
     if (MQTTIsConnected(&mqtt_client)) {
@@ -298,12 +302,14 @@ static int mqtt_reset() {
     return 0;
 }
 
-static void mqtt_start_reconnect(void*) {
+static void mqtt_start_reconnect(void *)
+{
     // printf("Signalling mqtt reconnect\n");
     mqtt_do_connect = 1;
 }
 
-static int mqtt_init() {
+static int mqtt_init()
+{
     int ret;
 
     mqtt_do_connect = 0;
@@ -312,7 +318,7 @@ static int mqtt_init() {
 
     unsigned int command_timeout_ms = 3000;
     MQTTClientInit(&mqtt_client, &mqtt_network, command_timeout_ms,
-            mqtt_tx_buf, sizeof(mqtt_tx_buf), mqtt_rx_buf, sizeof(mqtt_rx_buf));
+                   mqtt_tx_buf, sizeof(mqtt_tx_buf), mqtt_rx_buf, sizeof(mqtt_rx_buf));
 
     ret = format_topic(topic_lock, sizeof(topic_lock), "lock");
     if (ret) {
@@ -326,14 +332,14 @@ static int mqtt_init() {
 
     uint32_t chip_id = system_get_chip_id();
     ret = snprintf(main_config.mqtt_client_id, sizeof(main_config.mqtt_client_id), "esp-%02x%02x%02x",
-            (chip_id >> 16) & 0xff, (chip_id >> 8) & 0xff, chip_id & 0xff) >= sizeof(main_config.mqtt_client_id);
+                   (chip_id >> 16) & 0xff, (chip_id >> 8) & 0xff, chip_id & 0xff) >= sizeof(main_config.mqtt_client_id);
 
     if (ret) {
         return ret;
     }
 
     mqtt_connect_wait_timer = xTimerCreate("mqtt_connect_wait_timer",
-            pdMS_TO_TICKS(2000), pdFALSE, NULL, mqtt_start_reconnect);
+                                           pdMS_TO_TICKS(2000), pdFALSE, NULL, mqtt_start_reconnect);
 
     ret = mqtt_connect_wait_timer ? 0 : ENOMEM;
 
@@ -360,7 +366,8 @@ int mqtt_publish(const char *topic, const char *value)
     return ret;
 }
 
-static void set_station_mode() {
+static void set_station_mode()
+{
     // printf("STATION_MODE\n");
     if (wifi_get_opmode_default() != NULL_MODE) {
         printf("Setting default station mode\n");
@@ -391,7 +398,8 @@ static int on_got_ip()
 extern "C"
 void pvShowMalloc();
 
-void main_task(void* ctx) {
+void main_task(void *ctx)
+{
     (void) ctx;
 
     int count = 0;
@@ -440,7 +448,8 @@ struct app_deps app_deps = {
 #define THREAD_STACK_WORDS 4096
 #define THREAD_PRIO 8
 
-void user_init() {
+void user_init()
+{
     int ret;
 
     os_printf("SDK version: %s, free: %d, app build: %s\n", system_get_sdk_version(), system_get_free_heap_size(), __TIMESTAMP__);

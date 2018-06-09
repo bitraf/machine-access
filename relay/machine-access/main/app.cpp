@@ -25,9 +25,9 @@ enum class lock_state_t {
 
 static lock_state_t lock_state;
 
-const struct app_deps * deps;
+const struct app_deps *deps;
 
-int app_init(struct app_deps * const deps)
+int app_init(struct app_deps *const deps)
 {
     printf("%s: \n", __FUNCTION__);
 
@@ -43,7 +43,7 @@ int app_on_mqtt_connected()
     return deps->mqtt_publish("is_locked", lock_state == lock_state_t::LOCKED ? "true" : "false");
 }
 
-void app_on_lock(MQTTMessage* msg)
+void app_on_lock(MQTTMessage *msg)
 {
     printf("%s: \n", __FUNCTION__);
 
@@ -56,7 +56,7 @@ void app_on_lock(MQTTMessage* msg)
     deps->mqtt_publish("is_locked", "true");
 }
 
-void app_on_unlock(MQTTMessage* msg)
+void app_on_unlock(MQTTMessage *msg)
 {
     printf("%s: \n", __FUNCTION__);
 
