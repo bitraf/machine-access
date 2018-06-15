@@ -4,43 +4,17 @@
 #include "esp_wifi.h"
 #include "esp_spiffs.h"
 #include "spiffs.h"
-#include "spiffs.h"
 #include "MQTTClient.h"
 #include "timers.h"
 
 #include "sdkconfig.h"
 #include "main.h"
+#include "main-priv.h"
+
+#include "kv.h"
 
 #include <assert.h>
 #include <errno.h>
-
-// Allow overriding configuration from Kconfig.
-#define ISTR(x) STR(x)
-#define STR(x) #x
-
-#ifdef WIFI_SSID
-#define CFG_WIFI_SSID ISTR(WIFI_SSID)
-#else
-#define CFG_WIFI_SSID CONFIG_MAIN_WIFI_SSID_DEFAULT
-#endif
-
-#ifdef WIFI_PASSWORD
-#define CFG_WIFI_PASSWORD ISTR(WIFI_PASSWORD)
-#else
-#define CFG_WIFI_PASSWORD CONFIG_MAIN_WIFI_PASSWORD_DEFAULT
-#endif
-
-#ifdef MQTT_HOST
-#define CFG_MQTT_HOST ISTR(MQTT_HOST)
-#else
-#define CFG_MQTT_HOST CONFIG_MAIN_MQTT_HOST_DEFAULT
-#endif
-
-#ifdef MQTT_PORT
-#define CFG_MQTT_PORT MQTT_PORT
-#else
-#define CFG_MQTT_PORT CONFIG_MAIN_MQTT_PORT_DEFAULT
-#endif
 
 int mqtt_publish(const char *topic, const char *value);
 int buf_to_cstr(char *dst, const int dst_sz, const void *src, const int src_sz);
@@ -55,12 +29,6 @@ struct main_config {
     char mqtt_client_id[20] = {0};
 } main_config;
 
-extern "C"
-uint32_t user_rf_cal_sector_set();
-
-extern "C"
-void user_init();
-
 enum events {
     EVENTS_GOT_IP = 1 << 0,
     EVENTS_LOST_IP = 1 << 1,
@@ -68,6 +36,122 @@ enum events {
 };
 
 xTaskHandle main_task_handle = 0;
+
+struct _reent fs_reent;
+
+/*
+static int config_fd;
+
+static int config_read(void *ctx, void *buf, int sz)
+{
+    int fd = *((int *) ctx);
+
+    return _spiffs_read_r(&fs_reent, fd, buf, sz);
+}
+
+static int config_set_pos(void *ctx, int offset)
+{
+    int fd = *((int *) ctx);
+
+    return _spiffs_lseek_r(&fs_reent, fd, offset, SEEK_SET);
+}
+*/
+
+static const char *CONFIG_ITEM_WIFI_SSID = "wifi-ssid";
+static const char *CONFIG_ITEM_WIFI_PASSWORD = "wifi-password";
+
+static int config_on_item(void *ctx, const char *key, const char *value)
+{
+    printf("got item: '%s'='%s'\n", key, value);
+    if (strcmp(CONFIG_ITEM_WIFI_SSID, key) == 0) {
+        strncpy(main_config.wifi_ssid, value, sizeof(main_config.wifi_ssid));
+    } else if (strcmp(CONFIG_ITEM_WIFI_PASSWORD, key) == 0) {
+        strncpy(main_config.wifi_password, value, sizeof(main_config.wifi_password));
+    }
+    return 0;
+}
+
+static void config_make_default()
+{
+    strncpy(main_config.wifi_ssid, CFG_WIFI_SSID, sizeof(main_config.wifi_ssid));
+    strncpy(main_config.wifi_password, CFG_WIFI_PASSWORD, sizeof(main_config.wifi_password));
+
+    strncpy(main_config.mqtt_host, CFG_MQTT_HOST, sizeof(main_config.mqtt_host));
+    main_config.mqtt_port = CFG_MQTT_PORT;
+}
+
+/**
+ * Returns 0 on success. Check fs_reent._errno on failure.
+ */
+static int config_store()
+{
+    char buf[100];
+    int sz;
+
+    int fd = _spiffs_open_r(&fs_reent, "config.tmp", O_WRONLY | O_CREAT, 0);
+
+    if (fd == -1) {
+        return 1;
+    }
+
+    sz = kv_write_str(buf, sizeof(buf), CONFIG_ITEM_WIFI_SSID, main_config.wifi_ssid);
+    if (_spiffs_write_r(&fs_reent, fd, buf, sz) != sz) {
+        return 1;
+    }
+
+    sz = kv_write_str(buf, sizeof(buf), CONFIG_ITEM_WIFI_PASSWORD, main_config.wifi_password);
+    if (_spiffs_write_r(&fs_reent, fd, buf, sz) != sz) {
+        return 1;
+    }
+
+    if (_spiffs_close_r(&fs_reent, fd) == -1) {
+        return 1;
+    }
+
+    if (_spiffs_rename_r(&fs_reent, "config.tmp", "config") == -1) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static int config_load(char *buf, int sz)
+{
+    int ret;
+    char kbuf[20];
+    char vbuf[100];
+    char c;
+    int read;
+    struct kv_parser parser;
+
+    // _spiffs_unlink_r(&fs_reent, "config");
+    int fd = _spiffs_open_r(&fs_reent, "config", O_RDONLY, 0);
+    if (fd < 0) {
+        if (fs_reent._errno != ENOENT) {
+            return ENOENT;
+        }
+        printf("No config file found, creating default configuration\n");
+        config_make_default();
+        if (config_store()) {
+            printf("Failed to write new config, errno=%d\n", fs_reent._errno);
+            return 1;
+        }
+        return 0;
+    }
+
+    ret = kv_parser_init(&parser, config_on_item, NULL, kbuf, sizeof(kbuf), vbuf, sizeof(vbuf));
+
+    while((read = _spiffs_read_r(&fs_reent, fd, &c, 1)) > 0) {
+        ret = kv_parser_add(&parser, &c, 1);
+
+        if (ret) {
+            return ret;
+        }
+    }
+    ret = kv_parser_end(&parser);
+
+    return ret;
+}
 
 static const char *failok(int ret)
 {
@@ -333,10 +417,11 @@ static int mqtt_init()
     uint32_t chip_id = system_get_chip_id();
     ret = snprintf(main_config.mqtt_client_id, sizeof(main_config.mqtt_client_id), "esp-%02x%02x%02x",
                    (chip_id >> 16) & 0xff, (chip_id >> 8) & 0xff, chip_id & 0xff) >= sizeof(main_config.mqtt_client_id);
-
     if (ret) {
         return ret;
     }
+
+    printf("MQTT: client id=%s\n", main_config.mqtt_client_id);
 
     mqtt_connect_wait_timer = xTimerCreate("mqtt_connect_wait_timer",
                                            pdMS_TO_TICKS(2000), pdFALSE, NULL, mqtt_start_reconnect);
@@ -451,14 +536,18 @@ struct app_deps app_deps = {
 void user_init()
 {
     int ret;
+    char buf[100];
 
     os_printf("SDK version: %s, free: %d, app build: %s\n", system_get_sdk_version(), system_get_free_heap_size(), __TIMESTAMP__);
 
-    assert(mqtt_init() == 0);
+    assert(fs_init() == 0);
+    assert(config_load(buf, sizeof(buf)) == 0);
 
     printf("Configuration:\n");
     printf("  wifi-ssid=%s\n  wifi-password=%s\n\n", main_config.wifi_ssid, main_config.wifi_password);
-    printf("  mqtt-host=%s\n  mqtt-port=%d\n  mqtt-client-id=%s\n\n", main_config.mqtt_host, main_config.mqtt_port, main_config.mqtt_client_id);
+    printf("  mqtt-host=%s\n  mqtt-port=%d\n\n", main_config.mqtt_host, main_config.mqtt_port);
+
+    assert(mqtt_init() == 0);
 
     assert(app_init(&app_deps) == 0);
 

@@ -1,4 +1,8 @@
 #include <esp_system.h>
+#include "esp_spiffs.h"
+#include "sdkconfig.h"
+
+#include "main-priv.h"
 
 /******************************************************************************
  * FunctionName : user_rf_cal_sector_set
@@ -47,4 +51,21 @@ uint32_t user_rf_cal_sector_set()
     }
 
     return rf_cal_sec;
+}
+
+int fs_init()
+{
+    struct esp_spiffs_config config;
+
+    uint32_t log_page_size = CONFIG_MAIN_FLASH_LOG_PAGE_SIZE;
+
+    config.phys_size = CONFIG_MAIN_FLASH_SIZE_KB * 1024;
+    config.phys_addr = CONFIG_MAIN_FLASH_FLASH_ADDR_KB * 1024;
+    config.phys_erase_block = CONFIG_MAIN_FLASH_SECTOR_SIZE_KB * 1024;
+    config.log_block_size = CONFIG_MAIN_FLASH_LOG_BLOCK_SIZE_KB * 1024;
+    config.log_page_size = log_page_size;
+    config.fd_buf_size = CONFIG_MAIN_FLASH_FD_BUF_SIZE * 2;
+    config.cache_buf_size = (log_page_size + 32) * 8;
+
+    return esp_spiffs_init(&config);
 }

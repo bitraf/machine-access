@@ -1,23 +1,57 @@
 menu "Main"
 
-config MAIN_WIFI_SSID_DEFAULT
-    string "Wi-Fi SSID"
-    default "espressif"
+menu "SPIFFS"
+    config MAIN_FLASH_FLASH_ADDR_KB
+        int "Start address for flash file system. In kilobytes."
+        default 1024
 
-config MAIN_WIFI_PASSWORD_DEFAULT
-    string "Wi-Fi password"
-    default "12345678"
+    config MAIN_FLASH_SIZE_KB
+        int "Size of flash file system. In kilobytes."
+        range 1 1024
+        default 128
 
-config MAIN_MQTT_HOST_DEFAULT
-    string "MQTT host"
-    default "bitraf.no"
+    config MAIN_FLASH_SECTOR_SIZE_KB
+        int "Sector size. In kilobytes"
+        default 4
+        range 1 16
 
-config MAIN_MQTT_PORT_DEFAULT
-    int "MQTT port"
-    default 1883
+    config MAIN_FLASH_LOG_BLOCK_SIZE_KB
+        int "Log block size. In kilobytes"
+        default 4
+        range 1 16
 
-config MAIN_MQTT_PREFIX
-    string "MQTT topic prefix"
-    default "public/machine-access"
+    config MAIN_FLASH_LOG_PAGE_SIZE
+        int "Log page"
+        default 128
+
+    config MAIN_FLASH_FD_BUF_SIZE
+        int "FD buf size. Default: 32*4"
+        default 128
+
+endmenu
+
+menu "Wi-Fi"
+    config MAIN_WIFI_SSID_DEFAULT
+        string "Wi-Fi SSID"
+        default "espressif"
+
+    config MAIN_WIFI_PASSWORD_DEFAULT
+        string "Wi-Fi password"
+        default "12345678"
+endmenu
+
+menu "MQTT"
+    config MAIN_MQTT_HOST_DEFAULT
+        string "MQTT host"
+        default "bitraf.no"
+
+    config MAIN_MQTT_PORT_DEFAULT
+        int "MQTT port"
+        default 1883
+
+    config MAIN_MQTT_PREFIX
+        string "MQTT topic prefix"
+        default "public/machine-access"
+endmenu
 
 endmenu
