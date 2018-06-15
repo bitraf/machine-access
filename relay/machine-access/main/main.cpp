@@ -543,6 +543,15 @@ void user_init()
     assert(fs_init() == 0);
     assert(config_load(buf, sizeof(buf)) == 0);
 
+#ifdef WIFI_SSID
+    printf("Using override wifi-ssid: %s\n", ISTR(WIFI_SSID));
+    strncpy(main_config.wifi_ssid, ISTR(WIFI_SSID), sizeof(main_config.wifi_ssid));
+#endif
+#ifdef WIFI_PASSWORD
+    printf("Using override wifi-password: %s\n", ISTR(WIFI_PASSWORD));
+    strncpy(main_config.wifi_password, ISTR(WIFI_PASSWORD), sizeof(main_config.wifi_password));
+#endif
+
     printf("Configuration:\n");
     printf("  wifi-ssid=%s\n  wifi-password=%s\n\n", main_config.wifi_ssid, main_config.wifi_password);
     printf("  mqtt-host=%s\n  mqtt-port=%d\n\n", main_config.mqtt_host, main_config.mqtt_port);
