@@ -18,7 +18,8 @@ int kv_parser_init(struct kv_parser *parser, kv_callback *callback, void *ctx, c
     return 0;
 }
 
-int kv_parser_add(struct kv_parser *parser, char *buf, int sz) {
+int kv_parser_add(struct kv_parser *parser, char *buf, int sz)
+{
 
     char *dst;
     int dstsz;
@@ -79,11 +80,13 @@ int kv_parser_end(struct kv_parser *parser)
     return parser->end != parser->kbuf;
 }
 
-int kv_write_str(char *buffer, int sz, const char* key, const char* value) {
+int kv_write_str(char *buffer, int sz, const char *key, const char *value)
+{
     return snprintf(buffer, sz, "%s=%s", key, value) >= sz;
 }
 
-int kv_write_int(char *buffer, int sz, const char* key, int value) {
+int kv_write_int(char *buffer, int sz, const char *key, int value)
+{
     return snprintf(buffer, sz, "%s=%d", key, value) >= sz;
 }
 

@@ -141,7 +141,7 @@ static int config_load(char *buf, int sz)
 
     ret = kv_parser_init(&parser, config_on_item, NULL, kbuf, sizeof(kbuf), vbuf, sizeof(vbuf));
 
-    while((read = _spiffs_read_r(&fs_reent, fd, &c, 1)) > 0) {
+    while ((read = _spiffs_read_r(&fs_reent, fd, &c, 1)) > 0) {
         ret = kv_parser_add(&parser, &c, 1);
 
         if (ret) {
