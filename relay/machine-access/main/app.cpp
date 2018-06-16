@@ -121,7 +121,11 @@ void app_on_command(MQTTMessage *msg)
         return;
     }
     ret = kv_parser_add(&parser, (char *)msg->payload, msg->payloadlen);
+    if (!ret) {
+        ret = kv_parser_end(&parser);
+    }
     if (ret) {
+        printf("Could not parse chunk\n");
         // Error signalled by on_item
         return;
     }

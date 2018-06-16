@@ -219,7 +219,6 @@ static void on_message(MessageData *data)
     }
 
     if (memcmp(&topic[topic_len - sizeof(command) + 1], command, sizeof(command)) == 0) {
-        printf("COMMAND \n");
         app_on_command(data->message);
     } else {
         char buf2[100];
