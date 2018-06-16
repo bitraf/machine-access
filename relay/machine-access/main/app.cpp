@@ -20,12 +20,7 @@ static const uint8_t D10  = 1;
 
 */
 
-enum class lock_state_t {
-    LOCKED,
-    UNLOCKED
-};
-
-static lock_state_t lock_state;
+bool locked;
 
 const struct app_deps *deps;
 
@@ -35,24 +30,19 @@ int app_init(struct app_deps *const deps)
 
     ::deps = deps;
 
-    lock_state = lock_state_t::LOCKED;
+    locked = 1;
 
     return 0;
-}
-
-int app_on_mqtt_connected()
-{
-    return deps->mqtt_publish("locked", lock_state == lock_state_t::LOCKED ? "1" : "0");
 }
 
 static void command_lock()
 {
     printf("%s: \n", __FUNCTION__);
 
-    if (lock_state == lock_state_t::LOCKED) {
+    if (locked) {
         printf("Lock already locked.");
     } else {
-        lock_state = lock_state_t::LOCKED;
+        locked = 1;
     }
 
     deps->mqtt_publish("locked", "1");
@@ -62,13 +52,18 @@ static void command_unlock()
 {
     printf("%s: \n", __FUNCTION__);
 
-    if (lock_state == lock_state_t::UNLOCKED) {
+    if (!locked) {
         printf("Lock already unlocked.");
     } else {
-        lock_state = lock_state_t::UNLOCKED;
+        locked = 0;
     }
 
     deps->mqtt_publish("locked", "0");
+}
+
+static int command_refresh()
+{
+    return deps->mqtt_publish("locked", locked ? "1" : "0");
 }
 
 enum class command_type {
@@ -88,8 +83,10 @@ int on_item(void *, const char *key, const char *value)
     if (strcmp("command", key) == 0) {
         if (strcmp("lock", value) == 0) {
             command.type = command_type::LOCK;
-        } else if (strcmp("lock", value) == 0) {
+        } else if (strcmp("unlock", value) == 0) {
             command.type = command_type::UNLOCK;
+        } else if (strcmp("refresh", value) == 0) {
+            command.type = command_type::REFRESH;
         } else {
             deps->mqtt_publish("error", "unknown command");
             return 1;
@@ -133,9 +130,16 @@ void app_on_command(MQTTMessage *msg)
     if (command.type == command_type::UNKNOWN) {
     } else if (command.type == command_type::LOCK) {
         command_lock();
-    } else if (command.type == command_type::UNKNOWN) {
+    } else if (command.type == command_type::UNLOCK) {
         command_unlock();
+    } else if (command.type == command_type::REFRESH) {
+        command_refresh();
     } else {
         deps->mqtt_publish("error", "Unknown command");
     }
+}
+
+int app_on_mqtt_connected()
+{
+    return command_refresh();
 }
