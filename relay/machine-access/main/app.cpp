@@ -1,6 +1,8 @@
 #include "main.h"
+#include "kv.h"
 
 #include <stdio.h>
+#include <string.h>
 
 /* Pin mappings for NodeMCU
 
@@ -40,10 +42,10 @@ int app_init(struct app_deps *const deps)
 
 int app_on_mqtt_connected()
 {
-    return deps->mqtt_publish("is_locked", lock_state == lock_state_t::LOCKED ? "true" : "false");
+    return deps->mqtt_publish("locked", lock_state == lock_state_t::LOCKED ? "1" : "0");
 }
 
-void app_on_lock(MQTTMessage *msg)
+static void command_lock()
 {
     printf("%s: \n", __FUNCTION__);
 
@@ -53,10 +55,10 @@ void app_on_lock(MQTTMessage *msg)
         lock_state = lock_state_t::LOCKED;
     }
 
-    deps->mqtt_publish("is_locked", "true");
+    deps->mqtt_publish("locked", "1");
 }
 
-void app_on_unlock(MQTTMessage *msg)
+static void command_unlock()
 {
     printf("%s: \n", __FUNCTION__);
 
@@ -66,5 +68,70 @@ void app_on_unlock(MQTTMessage *msg)
         lock_state = lock_state_t::UNLOCKED;
     }
 
-    deps->mqtt_publish("is_locked", "false");
+    deps->mqtt_publish("locked", "0");
+}
+
+enum class command_type {
+    UNKNOWN,
+    LOCK,
+    UNLOCK,
+    REFRESH,
+};
+
+struct command {
+    command_type type;
+    char request[10];
+} command;
+
+int on_item(void *, const char *key, const char *value)
+{
+    if (strcmp("command", key) == 0) {
+        if (strcmp("lock", value) == 0) {
+            command.type = command_type::LOCK;
+        } else if (strcmp("lock", value) == 0) {
+            command.type = command_type::UNLOCK;
+        } else {
+            deps->mqtt_publish("error", "unknown command");
+            return 1;
+        }
+
+        return 0;
+    } else if (strcmp("request", key) == 0) {
+        int sz = strlcpy(command.request, value, sizeof(command.request));
+        if (sz < sizeof(command.request)) {
+            deps->mqtt_publish("error", "too long request field");
+            return 1;
+        }
+    }
+
+    deps->mqtt_publish("error", "Unknown key");
+    return 1;
+}
+
+void app_on_command(MQTTMessage *msg)
+{
+    char kbuf[10], vbuf[20];
+    command.type = command_type::UNKNOWN;
+    struct kv_parser parser;
+    int ret;
+
+    ret = kv_parser_init(&parser, on_item, NULL, kbuf, sizeof(kbuf), vbuf, sizeof(vbuf));
+    if (ret) {
+        deps->mqtt_publish("error", "Could not init parser");
+        return;
+    }
+    ret = kv_parser_add(&parser, (char *)msg->payload, msg->payloadlen);
+    if (ret) {
+        // Error signalled by on_item
+        return;
+    }
+
+    if (command.type == command_type::UNKNOWN) {
+    } else if (command.type == command_type::LOCK) {
+        command_lock();
+    } else if (command.type == command_type::UNKNOWN) {
+        command_unlock();
+    } else {
+        deps->mqtt_publish("error", "Unknown command");
+    }
 }

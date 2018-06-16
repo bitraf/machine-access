@@ -8,5 +8,4 @@ struct app_deps {
 
 int app_init(struct app_deps *);
 int app_on_mqtt_connected();
-void app_on_lock(MQTTMessage *);
-void app_on_unlock(MQTTMessage *);
+void app_on_command(MQTTMessage *);

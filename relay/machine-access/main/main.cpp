@@ -16,7 +16,12 @@
 #include <assert.h>
 #include <errno.h>
 
-int mqtt_publish(const char *topic, const char *value);
+enum class topic_kind {
+    DEVICE,
+    MACHINE_ACCESS,
+};
+
+int mqtt_publish(topic_kind kind, const char *topic, const char *value);
 int buf_to_cstr(char *dst, const int dst_sz, const void *src, const int src_sz);
 int mqtt_string_to_cstr(char *buf, int sz, MQTTString *str);
 
@@ -184,8 +189,7 @@ void wifi_event_handler_cb(System_Event_t *event)
 
 static void on_message(MessageData *data)
 {
-    static const char lock[] = "/lock";
-    static const char unlock[] = "/unlock";
+    static const char command[] = "/command";
     static char topic[100];
     static int topic_len;
 
@@ -214,14 +218,16 @@ static void on_message(MessageData *data)
         goto fail;
     }
 
-    if (memcmp(&topic[topic_len - sizeof(lock) + 1], lock, sizeof(lock)) == 0) {
-        printf("LOCK \n");
-        app_on_lock(data->message);
-    } else if (memcmp(&topic[topic_len - sizeof(unlock) + 1], unlock, sizeof(unlock)) == 0) {
-        printf("UNLOCK \n");
-        app_on_unlock(data->message);
+    if (memcmp(&topic[topic_len - sizeof(command) + 1], command, sizeof(command)) == 0) {
+        printf("COMMAND \n");
+        app_on_command(data->message);
     } else {
         char buf2[100];
+        int sz = snprintf(buf2, sizeof(buf2), "Bad topic: %s", topic);
+        if (sz < sizeof(buf2)) {
+            mqtt_publish(topic_kind::MACHINE_ACCESS, "error", buf2);
+        }
+
         buf_to_cstr(buf2, sizeof(buf2), data->message->payload, data->message->payloadlen);
         ret = ENODEV;
         goto fail;
@@ -237,10 +243,11 @@ fail:
 // MQTT
 //
 
-static int format_topic(char *buf, size_t sz, const char *suffix)
+static int format_topic(char *buf, size_t sz, topic_kind kind, const char *suffix)
 {
     uint32_t chip_id = system_get_chip_id();
-    int count = snprintf(buf, sz, CONFIG_MAIN_MQTT_PREFIX "/%02x%02x%02x/%s",
+    int count = snprintf(buf, sz, CONFIG_MAIN_MQTT_PREFIX "/%s/%02x%02x%02x/%s",
+                         kind == topic_kind::DEVICE ? "device" : "machine-access",
                          (chip_id >> 16) & 0xff, (chip_id >> 8) & 0xff, chip_id & 0xff, suffix);
     return count < sz ? 0 : ENOMEM;
 }
@@ -282,8 +289,7 @@ TimerHandle_t mqtt_connect_wait_timer;
 int mqtt_do_connect;
 
 // Topics that we subscribe to can't be stack allocated
-char topic_lock[100];
-char topic_unlock[100];
+char topic_command[100];
 
 static int mqtt_connect()
 {
@@ -297,7 +303,7 @@ static int mqtt_connect()
         vTaskDelay(pdMS_TO_TICKS(ms));
     }
 
-    ret = format_topic(buf, sizeof(buf), "online");
+    ret = format_topic(buf, sizeof(buf), topic_kind::DEVICE, "online");
     if (ret) {
         return ret;
     }
@@ -336,17 +342,12 @@ static int mqtt_connect()
     }
 #endif
 
-    ret = MQTTSubscribe(&mqtt_client, topic_lock, QOS2, on_message);
+    ret = MQTTSubscribe(&mqtt_client, topic_command, QOS2, on_message);
     if (ret) {
         return ret;
     }
 
-    ret = MQTTSubscribe(&mqtt_client, topic_unlock, QOS2, on_message);
-    if (ret) {
-        return ret;
-    }
-
-    ret = mqtt_publish("online", "1");
+    ret = mqtt_publish(topic_kind::DEVICE, "online", "1");
     if (ret) {
         return ret;
     }
@@ -357,7 +358,7 @@ static int mqtt_connect()
         return ENOMEM;
     }
 
-    ret = mqtt_publish("info", buf);
+    ret = mqtt_publish(topic_kind::DEVICE, "info", buf);
     if (ret) {
         return ret;
     }
@@ -404,12 +405,7 @@ static int mqtt_init()
     MQTTClientInit(&mqtt_client, &mqtt_network, command_timeout_ms,
                    mqtt_tx_buf, sizeof(mqtt_tx_buf), mqtt_rx_buf, sizeof(mqtt_rx_buf));
 
-    ret = format_topic(topic_lock, sizeof(topic_lock), "lock");
-    if (ret) {
-        return ret;
-    }
-
-    ret = format_topic(topic_unlock, sizeof(topic_unlock), "unlock");
+    ret = format_topic(topic_command, sizeof(topic_command), topic_kind::MACHINE_ACCESS, "command");
     if (ret) {
         return ret;
     }
@@ -431,10 +427,10 @@ static int mqtt_init()
     return ret;
 }
 
-int mqtt_publish(const char *topic, const char *value)
+int mqtt_publish(topic_kind kind, const char *topic, const char *value)
 {
     char buf[100];
-    format_topic(buf, sizeof(buf), topic);
+    format_topic(buf, sizeof(buf), kind, topic);
 
     printf("%s: %s %s\n", __FUNCTION__, buf, value);
 
@@ -443,7 +439,7 @@ int mqtt_publish(const char *topic, const char *value)
     m.qos = QOS1;
     m.payloadlen = strlen(value);
     m.payload = (void *)value;
-    m.retained = 1;
+    m.retained = 0;
     int ret = MQTTPublish(&mqtt_client, buf, &m);
 
     printf("%s: %s\n", __FUNCTION__, failok(ret));
@@ -525,8 +521,13 @@ void main_task(void *ctx)
     }
 }
 
+static int app_mqtt_publish(const char *topic, const char *value)
+{
+    return mqtt_publish(topic_kind::MACHINE_ACCESS, topic, value);
+}
+
 struct app_deps app_deps = {
-    .mqtt_publish = mqtt_publish
+    .mqtt_publish = app_mqtt_publish
 };
 
 #define THREAD_NAME "main"
@@ -544,10 +545,12 @@ void user_init()
     assert(config_load(buf, sizeof(buf)) == 0);
 
 #ifdef WIFI_SSID
+#warning Using override wifi-ssid
     printf("Using override wifi-ssid: %s\n", ISTR(WIFI_SSID));
     strncpy(main_config.wifi_ssid, ISTR(WIFI_SSID), sizeof(main_config.wifi_ssid));
 #endif
 #ifdef WIFI_PASSWORD
+#warning Using override wifi-password
     printf("Using override wifi-password: %s\n", ISTR(WIFI_PASSWORD));
     strncpy(main_config.wifi_password, ISTR(WIFI_PASSWORD), sizeof(main_config.wifi_password));
 #endif
