@@ -475,6 +475,74 @@ static int on_got_ip()
     return mqtt_reset();
 }
 
+struct mqtt_message {
+    char topic[20];
+    char value[100];
+};
+struct mqtt_message mqtt_queue[2];
+int mqtt_queue_size;
+SemaphoreHandle_t mqtt_queue_mutex;
+
+int mqtt_queue_init()
+{
+    mqtt_queue_size = 0;
+    mqtt_queue_mutex = xSemaphoreCreateMutex();
+    return 0;
+}
+
+int mqtt_queue_add(const char *topic, const char *value)
+{
+    int sz;
+    struct mqtt_message *item;
+    int ret = 1;
+
+    xSemaphoreTake(mqtt_queue_mutex, portMAX_DELAY);
+
+    if (mqtt_queue_size == sizeof(mqtt_queue)) {
+        goto fail;
+    }
+
+    printf("%s: mqtt_queue_size=%d\n", __FUNCTION__, mqtt_queue_size);
+
+    item = &mqtt_queue[mqtt_queue_size];
+
+    sz = strlcpy(item->topic, topic, sizeof(item->topic));
+    if (sz >= sizeof(item->topic)) {
+        goto fail;
+    }
+
+    sz = strlcpy(item->value, value, sizeof(item->value));
+    if (sz >= sizeof(item->topic)) {
+        goto fail;
+    }
+
+    mqtt_queue_size++;
+    ret = 0;
+
+fail:
+    xSemaphoreGive(mqtt_queue_mutex);
+    return ret;
+}
+
+int mqtt_queue_send_all()
+{
+    int ret = 0;
+    xSemaphoreTake(mqtt_queue_mutex, portMAX_DELAY);
+
+    if (mqtt_queue_size) {
+        printf("Publishing %d items.\n", mqtt_queue_size);
+    }
+
+    for (int i = 0; i < mqtt_queue_size; i++) {
+        struct mqtt_message *item = &mqtt_queue[i];
+        mqtt_publish(topic_kind::MACHINE_ACCESS, item->topic, item->value);
+    }
+    mqtt_queue_size = 0;
+
+    xSemaphoreGive(mqtt_queue_mutex);
+    return ret;
+}
+
 extern "C"
 void pvShowMalloc();
 
@@ -507,6 +575,8 @@ void main_task(void *ctx)
                     mqtt_reset();
                 }
             }
+        } else {
+            mqtt_queue_send_all();
         }
 
         if (timeout) {
@@ -522,7 +592,7 @@ void main_task(void *ctx)
 
 static int app_mqtt_publish(const char *topic, const char *value)
 {
-    return mqtt_publish(topic_kind::MACHINE_ACCESS, topic, value);
+    return mqtt_queue_add(topic, value);
 }
 
 struct app_deps app_deps = {
@@ -544,12 +614,10 @@ void user_init()
     assert(config_load(buf, sizeof(buf)) == 0);
 
 #ifdef WIFI_SSID
-#warning Using override wifi-ssid
     printf("Using override wifi-ssid: %s\n", ISTR(WIFI_SSID));
     strncpy(main_config.wifi_ssid, ISTR(WIFI_SSID), sizeof(main_config.wifi_ssid));
 #endif
 #ifdef WIFI_PASSWORD
-#warning Using override wifi-password
     printf("Using override wifi-password: %s\n", ISTR(WIFI_PASSWORD));
     strncpy(main_config.wifi_password, ISTR(WIFI_PASSWORD), sizeof(main_config.wifi_password));
 #endif
@@ -559,6 +627,7 @@ void user_init()
     printf("  mqtt-host=%s\n  mqtt-port=%d\n\n", main_config.mqtt_host, main_config.mqtt_port);
 
     assert(mqtt_init() == 0);
+    assert(mqtt_queue_init() == 0);
 
     assert(app_init(&app_deps) == 0);
 
