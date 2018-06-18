@@ -103,10 +103,12 @@ int kv_parser_end(struct kv_parser *parser)
 
 int kv_write_str(char *buffer, int sz, const char *key, const char *value)
 {
-    return snprintf(buffer, sz, "%s=%s", key, value) >= sz;
+    int count = snprintf(buffer, sz, "%s=%s\n", key, value);
+    return count < sz ? count : 0;
 }
 
 int kv_write_int(char *buffer, int sz, const char *key, int value)
 {
-    return snprintf(buffer, sz, "%s=%d", key, value) >= sz;
+    int count = snprintf(buffer, sz, "%s=%d\n", key, value);
+    return count < sz ? count : 0;
 }

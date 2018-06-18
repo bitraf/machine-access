@@ -15,6 +15,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <ctype.h>
 
 enum class topic_kind {
     DEVICE,
@@ -25,14 +26,20 @@ int mqtt_publish(topic_kind kind, const char *topic, const char *value);
 int buf_to_cstr(char *dst, const int dst_sz, const void *src, const int src_sz);
 int mqtt_string_to_cstr(char *buf, int sz, MQTTString *str);
 
-struct main_config {
-    char wifi_ssid[20] = CFG_WIFI_SSID;
-    char wifi_password[20] = CFG_WIFI_PASSWORD;
+int mqtt_queue_publish(topic_kind kind, const char *topic, const char *value);
 
-    char mqtt_host[20] = CFG_MQTT_HOST;
+struct main_config {
+    char wifi_ssid[21] = CFG_WIFI_SSID;
+    char wifi_password[21] = CFG_WIFI_PASSWORD;
+
+    char mqtt_host[21] = CFG_MQTT_HOST;
     int mqtt_port = CFG_MQTT_PORT;
-    char mqtt_client_id[20] = {0};
-} main_config;
+    char mqtt_client_id[21] = {0};
+
+    char device_name[21] = {0};
+};
+
+struct main_config main_config;
 
 enum events {
     EVENTS_GOT_IP = 1 << 0,
@@ -44,34 +51,19 @@ xTaskHandle main_task_handle = 0;
 
 struct _reent fs_reent;
 
-/*
-static int config_fd;
-
-static int config_read(void *ctx, void *buf, int sz)
-{
-    int fd = *((int *) ctx);
-
-    return _spiffs_read_r(&fs_reent, fd, buf, sz);
-}
-
-static int config_set_pos(void *ctx, int offset)
-{
-    int fd = *((int *) ctx);
-
-    return _spiffs_lseek_r(&fs_reent, fd, offset, SEEK_SET);
-}
-*/
-
 static const char *CONFIG_ITEM_WIFI_SSID = "wifi-ssid";
 static const char *CONFIG_ITEM_WIFI_PASSWORD = "wifi-password";
+static const char *CONFIG_ITEM_DEVICE_NAME = "device-name";
 
 static int config_on_item(void *ctx, const char *key, const char *value)
 {
-    printf("got item: '%s'='%s'\n", key, value);
+    printf("%s: '%s'='%s'\n", __FUNCTION__, key, value);
     if (strcmp(CONFIG_ITEM_WIFI_SSID, key) == 0) {
         strncpy(main_config.wifi_ssid, value, sizeof(main_config.wifi_ssid));
     } else if (strcmp(CONFIG_ITEM_WIFI_PASSWORD, key) == 0) {
         strncpy(main_config.wifi_password, value, sizeof(main_config.wifi_password));
+    } else if (strcmp(CONFIG_ITEM_DEVICE_NAME, key) == 0) {
+        strncpy(main_config.device_name, value, sizeof(main_config.device_name));
     }
     return 0;
 }
@@ -83,6 +75,9 @@ static void config_make_default()
 
     strncpy(main_config.mqtt_host, CFG_MQTT_HOST, sizeof(main_config.mqtt_host));
     main_config.mqtt_port = CFG_MQTT_PORT;
+    main_config.mqtt_client_id[0] = 0;
+
+    main_config.device_name[0] = 0;
 }
 
 /**
@@ -90,34 +85,59 @@ static void config_make_default()
  */
 static int config_store()
 {
-    char buf[100];
-    int sz;
-
-    int fd = _spiffs_open_r(&fs_reent, "config.tmp", O_WRONLY | O_CREAT, 0);
-
+    int fd = _spiffs_open_r(&fs_reent, "config.tmp", O_WRONLY | O_CREAT | O_TRUNC, 0);
     if (fd == -1) {
         return 1;
     }
 
-    sz = kv_write_str(buf, sizeof(buf), CONFIG_ITEM_WIFI_SSID, main_config.wifi_ssid);
-    if (_spiffs_write_r(&fs_reent, fd, buf, sz) != sz) {
-        return 1;
-    }
+    static const char * const items[][2] = {
+        {CONFIG_ITEM_WIFI_SSID, main_config.wifi_ssid},
+        {CONFIG_ITEM_WIFI_PASSWORD, main_config.wifi_password},
+        {CONFIG_ITEM_DEVICE_NAME, main_config.device_name},
+    };
 
-    sz = kv_write_str(buf, sizeof(buf), CONFIG_ITEM_WIFI_PASSWORD, main_config.wifi_password);
-    if (_spiffs_write_r(&fs_reent, fd, buf, sz) != sz) {
-        return 1;
+    for (int i = 0; i < (sizeof(items) / sizeof(items[0])); i++) {
+        const char* key = items[i][0];
+        const char* value = items[i][1];
+        char buf[100];
+        int sz;
+
+        // printf("key='%s', value='%s'\n", key, value);
+
+        sz = kv_write_str(buf, sizeof(buf), key, value);
+        if (sz == 0) {
+            goto fail;
+        }
+
+        if (_spiffs_write_r(&fs_reent, fd, buf, sz) != sz) {
+            goto fail;
+        }
     }
 
     if (_spiffs_close_r(&fs_reent, fd) == -1) {
         return 1;
     }
 
-    if (_spiffs_rename_r(&fs_reent, "config.tmp", "config") == -1) {
+    // SPIFFS doesn't support POSIX semantics for rename: 
+    // https://github.com/pellepl/spiffs/issues/125
+    if (_spiffs_unlink_r(&fs_reent, "config") == -1) {
+        printf("%s: unlink failed\n", __FUNCTION__);
         return 1;
     }
 
+    if (_spiffs_rename_r(&fs_reent, "config.tmp", "config") == -1) {
+        printf("%s: rename failed\n", __FUNCTION__);
+        return 1;
+    }
+
+    printf("%s: config written\n", __FUNCTION__);
+
     return 0;
+
+fail:
+    _spiffs_close_r(&fs_reent, fd);
+
+    return 1;
 }
 
 static int config_load(char *buf, int sz)
@@ -125,39 +145,48 @@ static int config_load(char *buf, int sz)
     int ret;
     char kbuf[20];
     char vbuf[100];
-    char c;
     int read;
     struct kv_parser parser;
 
     // _spiffs_unlink_r(&fs_reent, "config");
     int fd = _spiffs_open_r(&fs_reent, "config", O_RDONLY, 0);
+
     if (fd < 0) {
         if (fs_reent._errno != ENOENT) {
+            printf("Could not open config file: errno=%d, spiffs errno=%d\n", fs_reent._errno, _spiffs_fs_errno());
             return ENOENT;
         }
         printf("No config file found, creating default configuration\n");
         config_make_default();
         if (config_store()) {
-            printf("Failed to write new config, errno=%d\n", fs_reent._errno);
+            printf("Failed to write new config, errno=%d, spiffs=%d\n", fs_reent._errno, _spiffs_fs_errno());
             return 1;
         }
         return 0;
     }
 
     ret = kv_parser_init(&parser, config_on_item, NULL, kbuf, sizeof(kbuf), vbuf, sizeof(vbuf));
+    if (ret) {
+        goto fail;
+    }
 
-    while ((read = _spiffs_read_r(&fs_reent, fd, &c, 1)) > 0) {
-        ret = kv_parser_add(&parser, &c, 1);
-
+    while ((read = _spiffs_read_r(&fs_reent, fd, buf, sz)) > 0) {
+        ret = kv_parser_add(&parser, buf, read);
         if (ret) {
-            return ret;
+            goto fail;
         }
+    }
+    if (read == -1) {
+        goto fail;
     }
     ret = kv_parser_end(&parser);
 
+fail:
+    _spiffs_close_r(&fs_reent, fd);
     return ret;
 }
 
+__attribute__((unused))
 static const char *failok(int ret)
 {
     return ret ? "FAIL" : "OK";
@@ -187,55 +216,59 @@ void wifi_event_handler_cb(System_Event_t *event)
     }
 }
 
-static void on_message(MessageData *data)
+static void on_device_name(MessageData *data)
 {
-    static const char command[] = "/command";
-    static char topic[100];
-    static int topic_len;
+    const char *err;
 
-    int ret;
-
-    printf("%s: ", __FUNCTION__);
-
-    topic_len = mqtt_string_to_cstr(topic, sizeof(topic), data->topicName);
-    if (topic_len < 0) {
-        ret = -topic_len;
-        goto fail;
-    }
-    printf("topic=%s ", topic);
-
-    if (1) {
-        char tmp[100];
-        buf_to_cstr(tmp, sizeof(tmp), data->message->payload, data->message->payloadlen);
-        printf("msg.len=%d, payload: ", data->message->payloadlen);
-        puts(tmp);
+    const int len = data->message->payloadlen;
+    if (len >= sizeof(main_config.device_name)) {
+        err = "too long device name";
+        goto bad_input;
     }
 
-    if (topic_len < 10) {
-        // Silly short message. Won't happen as long as the
-        // subscriptions and MQTT broker are sane.
-        ret = ENOMEM;
-        goto fail;
-    }
+    char tmp[len + 1];
 
-    if (memcmp(&topic[topic_len - sizeof(command) + 1], command, sizeof(command)) == 0) {
-        app_on_command(data->message);
-    } else {
-        char buf2[100];
-        int sz = snprintf(buf2, sizeof(buf2), "Bad topic: %s", topic);
-        if (sz < sizeof(buf2)) {
-            mqtt_publish(topic_kind::MACHINE_ACCESS, "error", buf2);
+    for (int i = 0; i < len; i++) {
+        char c = ((char *)data->message->payload)[i];
+
+        int ok = isalnum(c) || c == '_' || c == '-';
+
+        if (!ok) {
+            auto err = "bad device name, must be one of [a-zA-Z0-9-_]";
+            printf("%s: %s\n", __FUNCTION__, err);
+            mqtt_queue_publish(topic_kind::DEVICE, "error", err);
+            goto bad_input;
         }
 
-        buf_to_cstr(buf2, sizeof(buf2), data->message->payload, data->message->payloadlen);
-        ret = ENODEV;
-        goto fail;
+        tmp[i] = c;
     }
+
+    tmp[len] = 0;
+
+    // We subscribe to our own /name topic, don't start a name
+    // changing loop.
+    if (strcmp(main_config.device_name, tmp) == 0) {
+        return;
+    }
+
+    strcpy(main_config.device_name, tmp);
+    main_config.device_name[len] = 0;
+
+    printf("%s: new device name: '%s'\n", __FUNCTION__, main_config.device_name);
+
+    config_store();
 
     return;
 
-fail:
-    printf("FAIL: err=%d\n", ret);
+bad_input:
+    printf("%s: %s\n", __FUNCTION__, err);
+    mqtt_queue_publish(topic_kind::DEVICE, "error", err);
+    mqtt_queue_publish(topic_kind::DEVICE, "name", main_config.device_name);
+}
+
+static void on_app_message(MessageData *data)
+{
+    app_on_command(data->message);
 }
 
 // ------------------------------------------------------------
@@ -288,6 +321,7 @@ TimerHandle_t mqtt_connect_wait_timer;
 int mqtt_do_connect;
 
 // Topics that we subscribe to can't be stack allocated
+char topic_device_name[100];
 char topic_command[100];
 
 static int mqtt_connect()
@@ -341,7 +375,12 @@ static int mqtt_connect()
     }
 #endif
 
-    ret = MQTTSubscribe(&mqtt_client, topic_command, QOS2, on_message);
+    ret = MQTTSubscribe(&mqtt_client, topic_device_name, QOS1, on_device_name);
+    if (ret) {
+        return ret;
+    }
+
+    ret = MQTTSubscribe(&mqtt_client, topic_command, QOS1, on_app_message);
     if (ret) {
         return ret;
     }
@@ -351,7 +390,7 @@ static int mqtt_connect()
         return ret;
     }
 
-    int sz = snprintf(buf, sizeof(buf), "build-rev: %s\nbuild-timestamp: %s\n", MAIN_GIT_REV, __TIMESTAMP__);
+    int sz = snprintf(buf, sizeof(buf), "build-rev: %s\nbuild-timestamp: %s", MAIN_GIT_REV, __TIMESTAMP__);
 
     if (sz >= sizeof(buf)) {
         return ENOMEM;
@@ -360,6 +399,13 @@ static int mqtt_connect()
     ret = mqtt_publish(topic_kind::DEVICE, "info", buf);
     if (ret) {
         return ret;
+    }
+
+    if (main_config.device_name[0]) {
+        ret = mqtt_publish(topic_kind::DEVICE, "name", main_config.device_name);
+        if (ret) {
+            return ret;
+        }
     }
 
     return app_on_mqtt_connected();
@@ -409,6 +455,11 @@ static int mqtt_init()
         return ret;
     }
 
+    ret = format_topic(topic_device_name, sizeof(topic_device_name), topic_kind::DEVICE, "name");
+    if (ret) {
+        return ret;
+    }
+
     uint32_t chip_id = system_get_chip_id();
     ret = snprintf(main_config.mqtt_client_id, sizeof(main_config.mqtt_client_id), "esp-%02x%02x%02x",
                    (chip_id >> 16) & 0xff, (chip_id >> 8) & 0xff, chip_id & 0xff) >= sizeof(main_config.mqtt_client_id);
@@ -441,7 +492,7 @@ int mqtt_publish(topic_kind kind, const char *topic, const char *value)
     m.retained = 0;
     int ret = MQTTPublish(&mqtt_client, buf, &m);
 
-    printf("%s: %s\n", __FUNCTION__, failok(ret));
+    // printf("%s: %s\n", __FUNCTION__, failok(ret));
 
     return ret;
 }
@@ -476,10 +527,12 @@ static int on_got_ip()
 }
 
 struct mqtt_message {
+    topic_kind kind;
     char topic[20];
     char value[100];
 };
 struct mqtt_message mqtt_queue[2];
+const int mqtt_queue_capacity = sizeof(mqtt_queue) / sizeof(mqtt_queue[0]);
 int mqtt_queue_size;
 SemaphoreHandle_t mqtt_queue_mutex;
 
@@ -490,7 +543,7 @@ int mqtt_queue_init()
     return 0;
 }
 
-int mqtt_queue_add(const char *topic, const char *value)
+int mqtt_queue_publish(topic_kind kind, const char *topic, const char *value)
 {
     int sz;
     struct mqtt_message *item;
@@ -498,21 +551,24 @@ int mqtt_queue_add(const char *topic, const char *value)
 
     xSemaphoreTake(mqtt_queue_mutex, portMAX_DELAY);
 
-    if (mqtt_queue_size == sizeof(mqtt_queue)) {
+    printf("%s: mqtt_queue_size=%d, max=%d\n", __FUNCTION__, mqtt_queue_size, mqtt_queue_capacity);
+
+    if (mqtt_queue_size == mqtt_queue_capacity) {
         goto fail;
     }
 
-    printf("%s: mqtt_queue_size=%d\n", __FUNCTION__, mqtt_queue_size);
-
     item = &mqtt_queue[mqtt_queue_size];
 
+    item->kind = kind;
     sz = strlcpy(item->topic, topic, sizeof(item->topic));
     if (sz >= sizeof(item->topic)) {
+        printf("%s: topic too long, max=%d, topic=%s\n", __FUNCTION__, sizeof(item->topic), topic);
         goto fail;
     }
 
     sz = strlcpy(item->value, value, sizeof(item->value));
-    if (sz >= sizeof(item->topic)) {
+    if (sz >= sizeof(item->value)) {
+        printf("%s: value too long, max=%d, value=%s\n", __FUNCTION__, sizeof(item->value), value);
         goto fail;
     }
 
@@ -530,7 +586,7 @@ int mqtt_queue_send_all()
     xSemaphoreTake(mqtt_queue_mutex, portMAX_DELAY);
 
     if (mqtt_queue_size) {
-        printf("Publishing %d items.\n", mqtt_queue_size);
+        // printf("Publishing %d items.\n", mqtt_queue_size);
     }
 
     for (int i = 0; i < mqtt_queue_size; i++) {
@@ -592,7 +648,7 @@ void main_task(void *ctx)
 
 static int app_mqtt_publish(const char *topic, const char *value)
 {
-    return mqtt_queue_add(topic, value);
+    return mqtt_queue_publish(topic_kind::MACHINE_ACCESS, topic, value);
 }
 
 struct app_deps app_deps = {
@@ -625,6 +681,7 @@ void user_init()
     printf("Configuration:\n");
     printf("  wifi-ssid=%s\n  wifi-password=%s\n\n", main_config.wifi_ssid, main_config.wifi_password);
     printf("  mqtt-host=%s\n  mqtt-port=%d\n\n", main_config.mqtt_host, main_config.mqtt_port);
+    printf("  device-name=%s\n\n", main_config.device_name[0] ? main_config.device_name : "<not set>");
 
     assert(mqtt_init() == 0);
     assert(mqtt_queue_init() == 0);
