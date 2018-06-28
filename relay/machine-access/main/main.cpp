@@ -515,6 +515,8 @@ static void set_station_mode()
 
     wifi_set_event_handler_cb(wifi_event_handler_cb);
 
+    printf("Connecting to AP: %s\n", main_config.wifi_ssid);
+    wifi_station_set_auto_connect(true);
     wifi_station_connect();
 }
 
