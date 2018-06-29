@@ -15,55 +15,83 @@ At Bitraf we use [p2k16](https://github.com/bitraf/p2k16) for this.
 
 [relay](relay)
 
-## Protocol
+## Protocols
 
-### Device status
-Mandatory
+### Device Protocol
 
-    $prefix/device/$id/online
+This uses the existing specification from Bitraf IoT:
+https://bitraf.no/wiki/IoT#Device.
 
-0 for offline
-1 for online
+It can be summarized like this:
 
-$id is an arbitrary unique identifier. For instance the MAC of device, or an id stored in Flash.
+* Online status is published to `$prefix/device/$device-id/online`.
+  Values are ASCII "1" or "0". Used with last will message.
+* Logical name is published to `$prefix/device/$device-id/name`. The
+  device may subscribe to this topic and update its own name.
+* Firmware version info is published to
+  `$prefix/device/$device-id/firmware`.
+* Current IP is published to `$prefix/device/$device-id/ip`.
 
-Device must use MQTT last will 0 here.
+### Machine Access Protocol
 
-
-Optional informational topics
-
-    $prefix/device/$id/firmware
-    $prefix/device/$id/ip
-    $prefix/device/$id/status
-    $prefix/device/$id/name
-
-
-### Locks
-
-N locks per device.
+Each device can have any number of locks, index from 0 to N. At Bitraf
 p2k16 has the mapping between device and contained locks.
 
-Payload format: keyA=valueA\nkeyB=valueB\n
+#### Payload format
 
-    $prefix/$lockid/command
+The Machine Access Protocol uses a key-value format as a payload:
 
+The format is text oriented. Each key-value pair is newline separated.
+The key is separated with a "=" character, the value is the rest of
+the line until a newline or end of message.
+
+Example: `keyA=valueA\nkeyB=valueB`
+
+#### Refreshing current state
+
+If a client has been disconnected it can request that all state topics
+are refreshed by sending a message with the key `command` and value
+`refresh` to `$prefix/machine-access/command`.
+
+Supporting this topic is an optional feature.
+
+#### Lock State
+
+Each lock's state is published under
+`$prefix/machine-access/$lock-index/locked`.
+
+The `state` key is REQUIRED and SHOULD have a value of either "locked"
+or "unlocked". The `request` key MAY be present. Its value is the
+value of the last command's `request` value that changed the lock.
+
+#### Controlling the lock
+
+A lock can be controlled by sending a message to
+`$prefix/machine-access/$lock-index/command` with a key `command`
+equal to `unlock` or `lock`. The `request` key should be included.
+It's value can be anything, but shouldn't be too long.
+
+Example payload:
 
     request=20400404
     command=unlock|lock
 
-Lock state
+When the lock's state is changed a message MUST be publised to
+the `../locked` topic.
 
-    $prefix/$lockid/locked
+#### Status Messages
 
-    state=unlock|lock
+The lock can send status messages on the generic `../status` topic.
+This can be used for for anything, but in particular error messages
+and statistics are useful.
+
+Optional keys:
+
+* `message`: human readable message
+* `level`: log level. Possible values: debug, info, warning
+* `request`: a related request
+
+Example:
+
+    message=Unknown lock id: 14
     OPTIONAL request=$request-id
-
-Upon successful command, the `locked` state shall be updated.
-
-Error messages
-
-    $prefix/$lockid/error
-
-    message=some-desciptive-text
-    OPTIONAL request=$request-id
-
