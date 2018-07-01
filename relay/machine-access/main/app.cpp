@@ -2,6 +2,7 @@
 #include "kv.h"
 
 #include "sdkconfig.h"
+#include "driver/gpio.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -65,20 +66,21 @@ int app_init(struct app_deps *const deps)
     printf("%s: There are %d locks configured\n", __FUNCTION__, CONFIG_MAIN_MA_LOCK_COUNT);
 
 #if CONFIG_MAIN_MA_LOCK_COUNT > 0
-    locks[0].pin = CONFIG_MAIN_MA_LOCK_1_PIN;
+    locks[0].pin = CONFIG_MAIN_MA_LOCK_0_PIN;
 #endif
 #if CONFIG_MAIN_MA_LOCK_COUNT > 1
-    locks[1].pin = CONFIG_MAIN_MA_LOCK_2_PIN;
+    locks[1].pin = CONFIG_MAIN_MA_LOCK_1_PIN;
 #endif
 #if CONFIG_MAIN_MA_LOCK_COUNT > 2
-    locks[2].pin = CONFIG_MAIN_MA_LOCK_3_PIN;
+    locks[2].pin = CONFIG_MAIN_MA_LOCK_2_PIN;
 #endif
 #if CONFIG_MAIN_MA_LOCK_COUNT > 3
-    locks[3].pin = CONFIG_MAIN_MA_LOCK_4_PIN;
+    locks[3].pin = CONFIG_MAIN_MA_LOCK_3_PIN;
 #endif
 
     for (int i = 0; i < CONFIG_MAIN_MA_LOCK_COUNT; i++) {
         locks[i].locked = 1;
+
         char buf[sizeof(locks[0].pattern)];
 
         if (snprintf(buf, sizeof(buf), "%d/command", i) >= sizeof(buf)) {
@@ -89,6 +91,15 @@ int app_init(struct app_deps *const deps)
         if (ret) {
             return ret;
         }
+
+        auto pin = locks[i].pin;
+
+        if (pin == 16) {
+            gpio16_output_conf();
+            gpio16_output_set(1);
+        } else {
+            gpio_output_conf(1 << pin, 0, 1 << pin, 0);
+        }
     }
 
     return 0;
@@ -98,12 +109,26 @@ static void command_lock(int lock_id, int state)
 {
     printf("%s: lock_id=%d\n", __FUNCTION__, lock_id);
 
-    if (state && locks[lock_id].locked) {
+    auto *lock = &locks[lock_id];
+
+    if (state && lock->locked) {
         printf("%s: Lock already locked.\n", __FUNCTION__);
-    } else if (!state && !locks[lock_id].locked) {
+    } else if (!state && !lock->locked) {
         printf("%s: Lock already unlocked.\n", __FUNCTION__);
     } else {
-        locks[lock_id].locked = state;
+        if (state) {
+            printf("%s: Locking lock.\n", __FUNCTION__);
+        } else {
+            printf("%s: Unlocking lock.\n", __FUNCTION__);
+        }
+        lock->locked = state;
+        auto pin = lock->pin;
+        if (pin == 16) {
+            gpio16_output_conf();
+            gpio16_output_set(state);
+        } else {
+            gpio_output_conf(1 << pin, 0, 1 << pin, 0);
+        }
     }
 
     char buf[10];
