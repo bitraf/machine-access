@@ -278,7 +278,7 @@ static void on_app_message(MessageData *data)
 static int format_topic(char *buf, size_t sz, topic_kind kind, const char *suffix)
 {
     uint32_t chip_id = system_get_chip_id();
-    int count = snprintf(buf, sz, CONFIG_MAIN_MQTT_PREFIX "/%s/%02x%02x%02x/%s",
+    int count = snprintf(buf, sz, CONFIG_MAIN_MQTT_PREFIX "/%s/esp-%02x%02x%02x/%s",
                          kind == topic_kind::DEVICE ? "device" : "machine-access",
                          (chip_id >> 16) & 0xff, (chip_id >> 8) & 0xff, chip_id & 0xff, suffix);
     return count < sz ? 0 : ENOMEM;
@@ -650,11 +650,26 @@ void main_task(void *ctx)
 
 static int app_mqtt_publish(const char *topic, const char *value)
 {
-    return mqtt_queue_publish(topic_kind::MACHINE_ACCESS, topic, value);
+    // return mqtt_queue_publish(topic_kind::MACHINE_ACCESS, topic, value);
+    return mqtt_publish(topic_kind::MACHINE_ACCESS, topic, value);
+}
+
+static int app_mqtt_subscribe(const char *pattern, void (*callback)(MessageData *))
+{
+    printf("%s: pattern=%s\n", __FUNCTION__, pattern);
+    int ret = MQTTSubscribe(&mqtt_client, pattern, QOS1, callback);
+    return ret;
+}
+
+static int app_mqtt_format(char* buf, int sz, const char *pattern)
+{
+    return format_topic(buf, sz, topic_kind::MACHINE_ACCESS, pattern);
 }
 
 struct app_deps app_deps = {
-    .mqtt_publish = app_mqtt_publish
+    .mqtt_publish = app_mqtt_publish,
+    .mqtt_subscribe = app_mqtt_subscribe,
+    .mqtt_format = app_mqtt_format,
 };
 
 #define THREAD_NAME "main"

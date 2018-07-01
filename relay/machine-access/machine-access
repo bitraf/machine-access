@@ -1,0 +1,65 @@
+#!/bin/bash
+
+set -euo pipefail
+
+prefix=$(sed -n 's,CONFIG_MAIN_MQTT_PREFIX="\(.*\)",\1,p' sdkconfig)
+device_id="esp-245398"
+
+function usage {
+    echo "usage: $0 [-d device] <command>" >&2
+    exit 1
+}
+
+function pub {
+    mosquitto_pub -h mqtt.bitraf.no -t "$prefix/machine-access/$device_id/command" -s
+}
+
+function pub_lock {
+    mosquitto_pub -h mqtt.bitraf.no -t "$prefix/machine-access/$device_id/$1/command" -s
+}
+
+while getopts ":d:l:" opt; do
+  case $opt in
+    d)
+      device_id="$OPTARG"
+      shift 2
+      ;;
+    l)
+      lock_id="$OPTARG"
+      shift 2
+      ;;
+    \?)
+      cmd="$OPTARG"
+      break
+      ;;
+    *)
+      echo woot??
+      cmd="$OPTARG"
+      break
+      ;;
+  esac
+done
+
+if [[ ${#} == 0 ]]
+then
+  usage
+fi
+
+cmd="${1}"
+case "$cmd" in
+refresh)
+    echo "command=refresh" | pub
+    ;;
+unlock)
+    echo "command=unlock" | pub_lock $lock_id
+    ;;
+lock)
+    echo "command=lock" | pub_lock $lock_id
+    ;;
+*)
+    echo Unknown command: $cmd
+    ;;
+esac
+
+exit 0
+

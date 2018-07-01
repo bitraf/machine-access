@@ -54,4 +54,29 @@ menu "MQTT"
         default "public/machine-access"
 endmenu
 
+menu "Machine Access"
+
+    config MAIN_MA_LOCK_COUNT
+        int "Number of locks"
+        range 1 4
+        default 1
+
+    config MAIN_MA_LOCK_1_PIN
+        int "Pin number for lock #1"
+        depends on MAIN_MA_LOCK_COUNT >= 1
+
+    config MAIN_MA_LOCK_2_PIN
+        int "Pin number for lock #2"
+        depends on MAIN_MA_LOCK_COUNT >= 2
+
+    config MAIN_MA_LOCK_3_PIN
+        int "Pin number for lock #3"
+        depends on MAIN_MA_LOCK_COUNT >= 3
+
+    config MAIN_MA_LOCK_4_PIN
+        int "Pin number for lock #4"
+        depends on MAIN_MA_LOCK_COUNT >= 4
+
+endmenu
+
 endmenu
