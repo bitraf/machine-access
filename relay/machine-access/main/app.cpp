@@ -24,7 +24,7 @@ static const uint8_t D10  = 1;
 
 */
 
-struct {
+struct lock {
     bool locked;
     int pin;
     char pattern[100];
@@ -57,6 +57,27 @@ void on_lock_command_3(MessageData* msg)
 }
 #endif
 
+static void configure_gpio(lock *l) {
+    auto pin = l->pin;
+
+    if (pin == 16) {
+        gpio16_output_set(l->locked);
+        gpio16_output_conf();
+    } else {
+        GPIO_OUTPUT_SET(pin, l->locked);
+    }
+}
+
+void set_gpio_state(lock *l) {
+    auto pin = l->pin;
+
+    if (pin == 16) {
+        gpio16_output_set(l->locked);
+    } else {
+        GPIO_OUTPUT_SET(pin, l->locked);
+    }
+}
+
 static const struct app_deps *deps;
 
 int app_init(struct app_deps *const deps)
@@ -79,27 +100,22 @@ int app_init(struct app_deps *const deps)
 #endif
 
     for (int i = 0; i < CONFIG_MAIN_MA_LOCK_COUNT; i++) {
-        locks[i].locked = 1;
+        auto *l = &locks[i];
 
-        char buf[sizeof(locks[0].pattern)];
+        l->locked = 1;
+
+        char buf[sizeof(l->pattern)];
 
         if (snprintf(buf, sizeof(buf), "%d/command", i) >= sizeof(buf)) {
             return 1;
         }
 
-        int ret = deps->mqtt_format(locks[i].pattern, sizeof(locks[i].pattern), buf);
+        int ret = deps->mqtt_format(l->pattern, sizeof(l->pattern), buf);
         if (ret) {
             return ret;
         }
 
-        auto pin = locks[i].pin;
-
-        if (pin == 16) {
-            gpio16_output_conf();
-            gpio16_output_set(1);
-        } else {
-            gpio_output_conf(1 << pin, 0, 1 << pin, 0);
-        }
+        configure_gpio(l);
     }
 
     return 0;
@@ -122,13 +138,7 @@ static void command_lock(int lock_id, int state)
             printf("%s: Unlocking lock.\n", __FUNCTION__);
         }
         lock->locked = state;
-        auto pin = lock->pin;
-        if (pin == 16) {
-            gpio16_output_conf();
-            gpio16_output_set(state);
-        } else {
-            gpio_output_conf(1 << pin, 0, 1 << pin, 0);
-        }
+        set_gpio_state(lock);
     }
 
     char buf[10];
